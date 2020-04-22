@@ -127,7 +127,6 @@ def get_receipt_items(receipt):
     fields = ['item', 'price', 'qty']
     return frappe.get_all('Receipts Item', filters={'parent': receipt}, fields=fields)
 
-
 def get_items_with_price_list_query(device,columns=None, pos_profile=None,):
 
     if not pos_profile:
@@ -136,18 +135,34 @@ def get_items_with_price_list_query(device,columns=None, pos_profile=None,):
 
     price_list = _get_price_list(pos_profile)
     item_group = get_device_item_group(device)
+    categories = get_device_categories(device)
     condition = ""
-    if item_group:
-        condition = "AND `tabItem`.item_group = '{0}'".format(item_group)
+    if len(item_group) > 0:
+        condition += "AND ("
+        for idx,i in enumerate(item_group):
+            condition += "`tabItem`.item_group = '{0}' ".format(i)
+            if int(idx) < int(len(item_group) - 1):
+                condition += "OR"
+        condition += ")"
+
+    if len(categories) > 0:
+        condition += "AND ("
+        for idx, ii in enumerate(categories):
+            condition += "`tabItem`.category = '{0}' ".format(ii)
+            if int(idx) < int(len(categories) - 1):
+                condition += "OR"
+        condition += ")"
+
     columns_str = ', '.join(columns) if columns else '*'
     query = """
       SELECT %s FROM `tabItem` 
       INNER JOIN `tabItem Price` ON `tabItem`.name = `tabItem Price`.item_code
       LEFT JOIN `tabItem Tax` ON `tabItem`.name = `tabItem Tax`.parent
-      LEFT JOIN `tabItem Tax Template Detail` ON `tabItem Tax Template Detail`.parent = `tabItem Tax`.item_tax_template
-      WHERE `tabItem`.in_tailpos = 1 AND `tabItem Price`.price_list= '%s' {0} """.format(condition) % (columns_str, price_list)
+      
+      WHERE `tabItem`.in_tailpos = 1 AND `tabItem Price`.price_list= '%s' {0}""".format(condition) % (columns_str, price_list)
 
     return query
+
 
 
 def _get_price_list(pos_profile):
@@ -159,14 +174,18 @@ def _get_price_list(pos_profile):
     return price_list
 
 def get_device_item_group(device):
-    item_group = frappe.db.get_value('Device', device, 'item_group')
-    print("ITEEEEEEEEEEEEEEEEEM GROOOUUUPP")
-    print(device)
-    print(item_group)
-    if not item_group or item_group == "All Item Groups":
-        return None
+    device_item_group = []
+    item_group = frappe.db.sql(""" SELECT item_group FROM `tabDevice Item Group` WHERE parent=%s """,(device))
+    for i in item_group:
+        device_item_group.append(i[0])
+    return device_item_group
 
-    return item_group
+def get_device_categories(device):
+    device_categories = []
+    categories = frappe.db.sql(""" SELECT category FROM `tabDevice Category` WHERE parent=%s """,(device))
+    for i in categories:
+        device_categories.append(i[0])
+    return device_categories
 # Where is this called?
 @frappe.whitelist()
 def save_item(doc, method):

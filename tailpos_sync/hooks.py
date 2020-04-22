@@ -38,7 +38,12 @@ fixtures = [
                     "Item-category",
                     "Item-color_or_image",
                     "Payment Entry-wallet_card_number",
-                    "Payment Entry-top_up_wallet"
+                    "Payment Entry-top_up_wallet",
+                    "Customer Credit Limit-total_prepaid_balance",
+                    "Error Log-device_id",
+                    "Error Log-wallet_card",
+                    "Error Log-pin",
+                    "Sales Invoice-receipt"
                 ]
             ]
         ]
@@ -60,7 +65,11 @@ fixtures = [
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Payment Entry" : "public/js/payment_entry.js"}
+doctype_js = {
+    "Payment Entry" : "public/js/payment_entry.js",
+    "Customer" : "public/js/customer.js",
+    "Sales Invoice" : "public/js/sales_invoice.js"
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -118,9 +127,11 @@ doc_events = {
         "validate": "tailpos_sync.doc_events.item.validate",
         "before_save": "tailpos_sync.doc_events.item.before_save"
     },
-    # "Sales Invoice": {
-    #     "before_save": "tailpos_sync.doc_events.sales_invoice.validate",
-    # },
+    "Sales Invoice": {
+        "validate": "tailpos_sync.doc_events.sales_invoice.validate",
+        "before_submit": "tailpos_sync.doc_events.sales_invoice.before_submit",
+        "after_submit": "tailpos_sync.doc_events.sales_invoice.after_submit",
+    },
     "Payment Entry": {
         "on_submit": "tailpos_sync.doc_events.payment_entry.on_submit",
     },

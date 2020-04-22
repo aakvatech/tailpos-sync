@@ -1,7 +1,7 @@
 from .sync_methods import *
 import frappe
 import datetime
-
+from .background_jobs import *
 
 @frappe.whitelist()
 def tailpos_test(data):
@@ -39,29 +39,62 @@ def sync_data(data):
     tailpos_data = data['tailposData']
     sync_type = data['typeOfSync']
     device_id = data['deviceId']
-    print("DATAAAAAAAAAAAA")
-    print(data)
-    uom_check()
-    deleted_records = get_deleted_documents()
-    delete_records(trash_object)
+    force_generate_sales_invoice = frappe.db.get_single_value('Tail Settings', 'force_generate_sales_invoice')
+    try:
+        uom_check()
+        deleted_records = get_deleted_documents()
+        delete_records(trash_object)
 
-    _sync_to_erpnext(tailpos_data, deleted_records,device_id)
+        _sync_to_erpnext(tailpos_data, deleted_records,device_id)
 
-    force_sync = (sync_type == "forceSync")
-    erpnext_data = sync_from_erpnext(device_id, force_sync)
+        force_sync = (sync_type == "forceSync")
+        erpnext_data = sync_from_erpnext(device_id, force_sync)
 
-    if not erpnext_data:
-        erpnext_data = ""
+        if not erpnext_data:
+            erpnext_data = ""
+        erpnext_data.append(get_device(device_id))
 
-    res = {
-        "data": erpnext_data,
-        "deleted_documents": deleted_records
-    }
-    print("RETURN DATA")
-    print({"data": res})
-    return {"data": res}
+        if force_generate_sales_invoice:
+            generate_si()
+        res = {
+            "data": erpnext_data,
+            "deleted_documents": deleted_records
+        }
 
+        return {"data": res, "status": True}
+    except:
+        print(frappe.get_traceback())
+        frappe.log_error(frappe.get_traceback(), 'sync failed')
+        return {"status": False}
 
+def get_device(device_id):
+    payment_types = ""
+
+    if device_id:
+        print(device_id)
+        try:
+            device_record = frappe.get_doc("Device", device_id)
+
+            if device_record:
+                for idx,i in enumerate(device_record.mop):
+                    payment_types += i.__dict__['payment_type']
+                    if idx != len(device_record.mop) - 1:
+                        payment_types += ","
+        except:
+            tailpos_settings_payment = frappe.get_single("Tail Settings")
+            for idx, i in enumerate(tailpos_settings_payment.mop):
+                payment_types += i.__dict__['payment_type']
+                if idx != len(tailpos_settings_payment.mop) - 1:
+                    payment_types += ","
+            frappe.log_error(frappe.get_traceback())
+    else:
+        tailpos_settings_payment = frappe.get_single("Tail Settings")
+        for idx, i in enumerate(tailpos_settings_payment.mop):
+            payment_types += i.__dict__['payment_type']
+            if idx != len(tailpos_settings_payment.mop) - 1:
+                payment_types += ","
+
+    return {"tableNames": "Device", "paymentTypes": payment_types}
 def check_modified(data, frappe_table):
     date_from_pos = datetime.datetime.fromtimestamp(data / 1000.0)
 
@@ -103,7 +136,7 @@ def _sync_to_erpnext(tailpos_data, deleted_records,device_id):
             if update_data:
                 insert_data(row, frappe_table, receipt_total)
         else:
-            frappe_table = new_doc(row,device_id)
+            frappe_table = new_doc(row)
 
             try:
                 frappe_table.insert(ignore_permissions=True)

@@ -16,17 +16,9 @@ class Receipts(Document):
 			self.id = 'Receipt/' + str(uuid.uuid4())
 		self.name = self.id
 
-	def validate(self):
-		set_date_updated(self)
 
 	def set_total_amount(self):
 		self.total_amount = 0
-
-		for line in self.receipt_lines:
-			qty = float(line.qty)
-			price = float(line.price)
-
-			self.total_amount = self.total_amount + (price * qty)
 
 	def set_default_values(self):
 		"""Set the status as title-d form"""
@@ -37,3 +29,40 @@ class Receipts(Document):
 	def before_insert(self):
 		"""Setup the Receipts document"""
 		self.set_default_values()
+
+	def compute_total(self):
+		total = (float(self.subtotal) + float(self.taxesvalue)) - float(self.discount_amount)
+
+		if self.roundoff:
+			remainder = float(total) % int(total)
+			print(remainder)
+			if remainder > 0.05:
+				total = int(total) + 1
+			else:
+				total = int(total)
+		self.total_amount = total
+
+	def compute_subtotal(self):
+		subtotal = 0
+		for item in self.receipt_lines:
+			subtotal += (float(item.__dict__['qty']) * float(item.__dict__['price']))
+		self.subtotal = subtotal
+
+	def compute_total_tax(self):
+		taxes = 0
+		for tax in self.receipt_taxes:
+			taxes += float(tax.__dict__['amount'])
+		self.taxesvalue = taxes
+
+	def compute_discount(self):
+		if self.discounttype == "Percentage":
+			self.discount_amount = round((self.discountvalue/100) * self.subtotal,2)
+		else:
+			self.discount_amount = self.discountvalue
+	def validate(self):
+		set_date_updated(self)
+		self.status = "Completed"
+		self.compute_subtotal()
+		self.compute_discount()
+		self.compute_total_tax()
+		self.compute_total()

@@ -1,33 +1,28 @@
 {
- "creation": "2019-11-08 09:18:30.076505",
+ "creation": "2020-03-17 08:28:13.422819",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "type",
-  "amount"
+  "category"
  ],
  "fields": [
   {
-   "fieldname": "type",
-   "fieldtype": "Data",
+   "fieldname": "category",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Type"
-  },
-  {
-   "fieldname": "amount",
-   "fieldtype": "Currency",
-   "in_list_view": 1,
-   "label": "Amount"
+   "label": "Category",
+   "options": "Categories"
   }
  ],
  "istable": 1,
- "modified": "2020-04-01 10:40:54.025518",
+ "modified": "2020-03-17 08:28:13.422819",
  "modified_by": "Administrator",
  "module": "TailPOS Sync",
- "name": "Payment Types",
+ "name": "Device Category",
  "owner": "Administrator",
  "permissions": [],
+ "quick_entry": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
  "track_changes": 1

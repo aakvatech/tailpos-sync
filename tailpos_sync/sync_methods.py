@@ -3,7 +3,7 @@ import frappe
 import datetime
 import json
 
-from .utils import get_items_with_price_list_query
+from .utils import get_items_with_price_list_query,get_device_categories
 
 
 def get_tables_for_sync():
@@ -26,7 +26,7 @@ def get_item_query(pos_profile,device):
         'tabItem.stock_uom',
         'tabItem.item_name',
         'tabItem.color_or_image',
-        '`tabItem Tax Template Detail`.tax_rate'
+        '`tabItem Tax`.item_tax_template'
     ]
 
     standard_rate = 'standard_rate'
@@ -37,13 +37,31 @@ def get_item_query(pos_profile,device):
     columns.append(standard_rate)
 
     return get_items_with_price_list_query(device,columns, pos_profile)
+def get_category_query(device):
+    categories = get_device_categories(device)
+    condition = ""
+    if len(categories) > 0:
+        condition += "WHERE ("
 
+        for idx,category in enumerate(categories):
+            condition += "name='{0}'".format(category)
+            if int(idx) < int(len(categories) - 1):
+                condition += " OR "
+
+        condition += ")"
+
+    query = """SELECT * FROM `tabCategories` {0}""".format(condition)
+    return query
+def test():
+    pos_profile = frappe.db.get_value('Device', "f2ef25d668", 'pos_profile')
+    get_table_select_query("Item", "f2ef25d668", True, pos_profile)
 
 def get_table_select_query(table,device, force_sync=True, pos_profile=None):
     query = "SELECT * FROM `tab{0}`".format(table)
     if table == 'Item':
         query = get_item_query(pos_profile,device)
-
+    if table == "Categories":
+        query = get_category_query(device)
     if not force_sync:
         connector = " AND " if "WHERE" in query else " WHERE "
         if table == "Item":
@@ -58,8 +76,7 @@ def get_table_select_query(table,device, force_sync=True, pos_profile=None):
 def insert_data(data, frappe_table, receipt_total):
     sync_object = data['syncObject']
     db_name = data['dbName']
-
-    for key, value in sync_object.iteritems():
+    for key, value in sync_object.items():
         field_name = str(key).lower()
 
         if field_name == "taxes":
@@ -108,7 +125,7 @@ def insert_data(data, frappe_table, receipt_total):
             frappe_table.db_set("type", "Fix Discount")
 
         if value == "percentage":
-            frappe_table.db_set("type", "Percentage")
+            frappe_table.db_set("discountType", "Percentage")
 
         if field_name == "date":
             if value:
@@ -171,66 +188,27 @@ def sync_from_erpnext(device=None, force_sync=True):
     tables = get_tables_for_sync()
     pos_profile = frappe.db.get_value('Device', device, 'pos_profile')
 
-    default_company = get_default_company()
+    default_company = get_default_company(device)
     data.extend(default_company)
 
     for table in tables:
         query = get_table_select_query(table,device, force_sync, pos_profile=pos_profile)
         query_data = frappe.db.sql(query, as_dict=True)
+        if table == "Item":
+            for i in query_data:
+                if 'item_tax_template' in i:
+                    item_tax_details = frappe.db.sql(""" SELECT tax_type, tax_rate FROM `tabItem Tax Template Detail` WHERE parent=%s""", i.item_tax_template ,as_dict=True)
+                    item_tax_details_split = []
+                    for iii in item_tax_details:
+                        item_tax_details_split.append({
+                            "tax_type": iii.tax_type.split("-")[0],
+                            "tax_rate": iii.tax_rate
+                        })
+                    i.item_tax_template_detail = item_tax_details_split
+
         sync_data = update_sync_data(query_data, table)
 
         if sync_data:
-            data.extend(sync_data)
-
-    return data
-
-
-# DEPRECATED
-def force_sync_from_erpnext_to_tailpos(device=None):
-    """
-    Fetches all data in ERPNext.
-
-    :param device:
-    :retdilurn data:
-    """
-    data = []
-    tables = get_tables_for_sync()
-
-    if device:
-        pos_profile = frappe.db.get_value('Device', device, 'pos_profile')
-
-    try:
-        for table in tables:
-            query = get_table_select_query(table, device,pos_profile=pos_profile)
-            query_data = frappe.db.sql(query, as_dict=True)
-            sync_data = update_sync_data(query_data, table)
-            data.extend(sync_data)
-    except Exception:
-        print(frappe.get_traceback())
-
-    return data
-
-
-# DEPRECATED
-def sync_from_erpnext_to_tailpos(device=None):
-    """
-    Fetch added/updated data in ERPNext.
-
-    :param device: name of the Device doctype
-    :return data: sync data
-    """
-    data = []
-    tables = get_tables_for_sync()
-    if device:
-        pos_profile = frappe.db.get_value('Device', device, 'pos_profile')
-
-    for table in tables:
-        query = get_table_select_query(table,device, False, pos_profile=pos_profile)
-        query_data = frappe.db.sql(query, as_dict=True)
-
-        # Kung naay sulod
-        if len(query_data) > 0:
-            sync_data = update_sync_data(query_data, table)
             data.extend(sync_data)
 
     return data
@@ -249,12 +227,12 @@ def delete_records(data):
 
 def is_deleted_record(_id, deleted_records):
     for deleted_record in deleted_records:
-        if deleted_record('_id') == _id:
+        if deleted_record['_id'] == _id:
             return True
     return False
 
 
-def new_doc(data, device_id, owner='Administrator'):
+def new_doc(data, owner='Administrator'):
     db_name = data['dbName']
     sync_object = data['syncObject']
 
@@ -314,55 +292,96 @@ def new_doc(data, device_id, owner='Administrator'):
         doc.update({
             'paid': sync_object['paid'],
             'receipt': sync_object['receipt'],
-            'date': get_date_fromtimestamp(sync_object['date'])
+            'date': get_date_fromtimestamp(sync_object['date']),
+            'payment_types': get_payment_types(sync_object['type']),
+            'deviceid': sync_object['deviceId'],
         })
     elif db_name == 'Receipts':
         doc.update({
             'status': sync_object['status'].capitalize(),
             'shift': sync_object['shift'],
+            'roundoff': sync_object['roundOff'],
             'customer': sync_object['customer'],
             'attendant': sync_object['attendant'],
-            'taxesvalue': sync_object['taxesAmount'],
+            'taxesvalue': round(sync_object['taxesAmount'],2),
             'discount': sync_object['discount'],
             'reason': sync_object['reason'],
             'deviceid': sync_object['deviceId'],
-            'discountvalue': sync_object['discountValue'],
+            'discountvalue': sync_object['discountValue'] * 100 if sync_object['discountType'] == "percentage" else sync_object['discountValue'],
             'receiptnumber': sync_object['receiptNumber'],
             'discounttype': sync_object['discountType'].title(),
             'date': get_date_fromtimestamp(sync_object['date']),
             'receipt_lines': get_receipt_lines(sync_object['lines']),
+            'receipt_taxes': get_taxes(sync_object['lines']),
+            'subtotal': subtotal(sync_object['lines']),
         })
-    if db_name != "Payments":
-        return frappe.get_doc(doc)
-    else:
-        try:
-            payment = frappe.get_doc(doc)
-            if sync_object['type']:
 
-                for i in json.loads(sync_object['type']):
-                    mop = frappe.get_all('Device Payment', filters={'parent': device_id, 'payment_type': i['type']},fields=['mode_of_payment'])
-                    payment.append("payment_types", {
-                        "type": mop[0].mode_of_payment if len(mop) > 0 else frappe.get_all('Tail Settings Payment', filters={'payment_type': i['type']}, fields=['mode_of_payment'])[0].mode_of_payment,
-                        "amount": i['amount'],
+    return frappe.get_doc(doc)
+
+def get_payment_types(payment):
+    _payment_types = []
+
+    payment_types = json.loads(payment)
+    for type in payment_types:
+        _payment_types.append({
+            "type": type['type'],
+            "amount": type['amount'],
+        })
+    return _payment_types
+
+def get_taxes(lines):
+    receipt_taxes = []
+
+    for line in lines:
+        tax_in_line = json.loads(line['tax'])
+        for i in tax_in_line:
+            if len(receipt_taxes) > 0:
+                if not any(x['tax'] == i['tax_type'] for x in receipt_taxes):
+                    receipt_taxes.append({
+                        'tax': i['tax_type'],
+                        'amount': (i['tax_rate'] / 100) * (line['qty'] * line['price']),
                     })
-
-            return payment
-        except:
-            print(frappe.get_traceback())
+                else:
+                    for ii in receipt_taxes:
+                        if ii['tax'] == i['tax_type']:
+                            ii['amount'] += (i['tax_rate'] / 100) * (line['qty'] * line['price'])
+            else:
+                receipt_taxes.append({
+                    'tax': i['tax_type'],
+                    'amount': (i['tax_rate'] / 100) * (line['qty'] * line['price']),
+                })
+    return receipt_taxes
 def get_receipt_lines(lines):
     receipt_lines = []
 
     for line in lines:
+        taxes_in_string = ""
+        tax_in_line = json.loads(line['tax'])
+        tax_total = 0
+
+        for i in tax_in_line:
+            tax_total += (i['tax_rate'] / 100) * (line['qty'] * line['price'])
+            taxes_in_string += i['tax_type'] + "  -  " + str(i['tax_rate'])
         receipt_lines.append({
             'item': line['item'],
             'item_name': line['item_name'],
             'sold_by': line['sold_by'],
             'price': line['price'],
-            'qty': line['qty']
+            'qty': line['qty'],
+            'item_total_tax': tax_total,
+            'taxes': taxes_in_string
         })
 
     return receipt_lines
 
+
+def subtotal(lines):
+    subtotal = 0
+
+    for line in lines:
+        subtotal = subtotal + (line['price'] * line['qty'])
+
+    return subtotal
 
 def uom_check():
     each = frappe.db.sql(""" SELECT * FROM `tabUOM` WHERE name='Each'""")
@@ -415,15 +434,17 @@ def update_sync_data(data, table):
     return res
 
 
-def get_default_company():
+def get_default_company(device):
     default_company = frappe.get_single('Tail Settings')
+    default_company_from_device = frappe.db.get_value('Device', device, 'company')
+    if default_company_from_device:
+        default_company.company_name = default_company_from_device
     res = []
     res.append({
         'tableNames': "Company",
         'syncObject': default_company
     })
     return res
-
 
 def _get_discount_type(percentage_type):
     discount_type = {
